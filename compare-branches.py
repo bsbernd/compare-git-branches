@@ -11,25 +11,36 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 '''
 
 import sys, subprocess, getopt
+import re
 
-gitLogCmd = ['git','log','--pretty=oneline','--no-merges']
-gitAuthorCmd = ['git', 'show', '-s', '--format=%an']
+gitLogCmd       = ['git','log','--pretty=oneline','--no-merges']
+gitAuthorCmd    = ['git', 'show', '-s', '--format=%an']
+gitCommitMsgCmd = ['git', 'log', '-1', '--pretty=%B' ]
 
 branchAOnly  = False
 branchBOnly  = False
 reversedOrder = False
+
+cherryPickLine = '\(cherry picked from commit '
 
 # just a basic commit object
 class gitCommit:
     def __init__(self, commitID, commitSubject):
         self.commitID      = commitID
         self.commitSubject = commitSubject
+        self.cherryPickID  = ""
 
     def getCommitID(self):
         return self.commitID
 
     def getCommitSubject(self):
         return self.commitSubject
+
+    def addCherryPickID(self, ID):
+        self.cherryPickID = ID
+
+    def getCherryPickID(self):
+        return self.cherryPickID
 
 
 class Branch:
@@ -40,21 +51,34 @@ class Branch:
         self.commitObjDict  = {}  # list of gitCommit objects
         self.missingDict    = {} # list of missing commitIDs of this branch
 
+    def searchCherryPickID(self, commitID):
+        commitMsg = subprocess.check_output(gitCommitMsgCmd + [commitID])
+
+        searchRegEx  = re.compile(cherryPickLine)
+
+        for line in commitMsg.splitlines():
+            if searchRegEx.search(line):
+                cherryPickID = searchRegEx.split(line)[1]
+
+                # remove closing bracket
+                cherryPickID = re.sub('\)$', '', cherryPickID)
+
+                return cherryPickID
+
     def addCommit(self, commitID, commitSubject):
 
-        self.commitList.append(commitID)
-
         commitObj = gitCommit(commitID, commitSubject)
-        self.commitObjDict[commitID] = commitObj
 
-        # we don't use "git show", as it includes the message 
-        diff = subprocess.check_output(['git', 'show', commitID])
+        gitShow = subprocess.check_output(['git', 'show', commitID])
         proc = subprocess.Popen(['git', 'patch-id'], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
-        patchID = proc.communicate(input=diff)[0].split(' ')[0]
+        patchID = proc.communicate(input=gitShow)[0].split(' ')[0]
 
+        commitObj.addCherryPickID(self.searchCherryPickID(commitID) )
         # print self.branchName + ': Adding: ' + patchID + ' : ' + commitID
 
-        self.patchIdDict[patchID] = commitID
+        self.commitList.append(commitID)
+        self.commitObjDict[commitID] = commitObj
+        self.patchIdDict[patchID]    = commitID
 
     def addLogLine(self, logLine):
         commitID      = logLine[:40]
@@ -92,12 +116,15 @@ class Branch:
 
         return False
 
-    def printMissingCommits(self, comparisonCommitList, comparisonCommitDict):
+    # iterate over missing commits to either reverse-assign cherry-pick-ids or to
+    # print missing commits
+    def iterateMissingCommits(self, comparisonCommitList, comparisonCommitDict, doPrint):
 
         # Note: Print in the order given by the commitList and not
         #       in arbitrary order of the commit dictionary.
 
-        print "Missing from %s" % self.branchName
+        if doPrint:
+            print "Missing from %s" % self.branchName
 
         for commitID in comparisonCommitList:
             if self.isCommitInMissingDict(commitID):
@@ -105,10 +132,28 @@ class Branch:
                 commitAuthor = subprocess.check_output(cmd).rstrip()
                 commitObj    = comparisonCommitDict[commitID]
 
-                print '  %s (%s) %s' % \
-                    (commitID, commitAuthor, commitObj.getCommitSubject() )
+                cherryPickID = commitObj.getCherryPickID()
+                if (cherryPickID and (cherryPickID in self.commitObjDict) ):
 
-        print
+                    # assign cherry pick id to our branch
+                    if not doPrint:
+                        cherryObj = self.commitObjDict[cherryPickID]
+                        cherryObj.addCherryPickID(commitID)
+
+                    continue
+
+                if doPrint:
+                    print '  %s (%s) %s' % \
+                        (commitID, commitAuthor, commitObj.getCommitSubject() )
+
+        if doPrint:
+            print
+
+    def printMissingCommits(self, comparisonCommitList, comparisonCommitDict):
+        self.iterateMissingCommits(comparisonCommitList, comparisonCommitDict, True)
+
+    def reverseAssignCherryPickIDs(self, comparisonCommitList, comparisonCommitDict):
+        self.iterateMissingCommits(comparisonCommitList, comparisonCommitDict, False)
 
 
     def getPatchIdDict(self):
@@ -144,7 +189,7 @@ try:
 except:
     usage()
     sys.exit()
-    
+
 
 for opt,arg in opts:
     if opt == '-h':
@@ -180,6 +225,12 @@ branchBObj.doComparedBranchLog(branchAName)
 branchAObj.createMissingDict(branchBObj.getPatchIdDict() )
 branchBObj.createMissingDict(branchAObj.getPatchIdDict() )
 
+
+branchAObj.reverseAssignCherryPickIDs(branchBObj.getCommitList(), \
+    branchBObj.getCommitObjDict()  )
+
+branchBObj.reverseAssignCherryPickIDs(branchAObj.getCommitList(), \
+    branchAObj.getCommitObjDict() )
 
 #print
 
