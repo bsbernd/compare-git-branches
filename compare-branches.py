@@ -14,11 +14,11 @@ import sys, subprocess, getopt
 import re
 
 gitLogCmd       = ['git','log','--pretty=oneline','--no-merges']
-gitAuthorCmd    = ['git', 'show', '-s', '--format=%an']
+gitAuthorCmd    = ['git', 'show', '-s', '--format=(%an)']
 gitCommitMsgCmd = ['git', 'log', '-1', '--pretty=%B' ]
 
-branchAOnly  = False
-branchBOnly  = False
+branchAOnly   = False
+branchBOnly   = False
 reversedOrder = False
 
 cherryPickLine = '\(cherry picked from commit '
@@ -148,7 +148,12 @@ class Branch:
                     continue
 
                 if doPrint:
-                    print '  %s (%s) %s' % \
+
+                    if 'filterAuthor' in globals() and \
+                        not re.search(filterAuthor, commitAuthor):
+                            continue # a different owner
+
+                    print '  %s %s %s' % \
                         (commitID, commitAuthor, commitObj.getCommitSubject() )
 
         if doPrint:
@@ -184,10 +189,14 @@ def usage():
                 List commits missing from branch a only.
           -B
                 List commits missing from branch b only.
+          -d
+                Print the date when the commit was created.
           -e
                 Exact search with *all* commits. Usually we list commits with
                 'git log branchA ^branchB', which might not be correct with
                 merges between branches.
+          -f
+                Only print commits created by this user.
           -r
                 Print in reverse order (older (top) to newer (bottom) ).
           -t
@@ -196,7 +205,7 @@ def usage():
 
 
 try:
-    opts, args = getopt.getopt(sys.argv[1:], "ha:b:BAert:")
+    opts, args = getopt.getopt(sys.argv[1:], "ha:b:BAdef:rt:")
 except:
     usage()
     sys.exit()
@@ -214,8 +223,13 @@ for opt,arg in opts:
         branchAOnly = True
     if opt == '-B':
         branchBOnly = True
+    if opt == '-d':
+        # mis-use the author command and add the commit date
+        gitAuthorCmd[3] = '--format=(%an) %aD'
     if opt == '-e':
         exactSearch = True
+    if opt == '-f':
+        filterAuthor = arg
     if opt == '-r':
         reversedOrder = True
     if opt == '-t':
