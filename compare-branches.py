@@ -35,13 +35,17 @@ class gitCommit:
 class Branch:
     def __init__(self, branchName):
         self.branchName = branchName
-        self.patchIdDict = {} # for fast search
-        self.commitList = []  # list of gitCommit objects
-        self.missingList = [] # list of missing commitIDs of this branch
+        self.patchIdDict    = {} # for fast search
+        self.commitList     = []  # list of git commit ids
+        self.commitObjDict  = {}  # list of gitCommit objects
+        self.missingDict    = {} # list of missing commitIDs of this branch
 
     def addCommit(self, commitID, commitSubject):
+
+        self.commitList.append(commitID)
+
         commitObj = gitCommit(commitID, commitSubject)
-        self.commitList.append(commitObj)
+        self.commitObjDict[commitID] = commitObj
 
         # we don't use "git show", as it includes the message 
         diff = subprocess.check_output(['git', 'show', commitID])
@@ -64,44 +68,45 @@ class Branch:
 
         for line in lines:
             self.addLogLine(line)
-    
+
     def doComparedBranchLog(self, comparedBranchName):
         cmd = gitLogCmd + [self.branchName]
         cmd += ['^' + comparedBranchName]
         # print 'Compared branch log: ' + str(cmd)
 
         log = subprocess.check_output(cmd );
-        
+
         self.addGitLog(log)
 
-    def createMissingList(self, comparisonDict):
+    def createMissingDict(self, comparisonDict):
         for key in comparisonDict.keys():
             if key not in self.patchIdDict:
                 commitID = comparisonDict.get(key)
-                self.missingList.append(commitID)
+                self.missingDict[commitID] = commitID
 
                 # print self.branchName + ': missing: ' + key + ' : ' + commitID
 
-    def isCommitInMissingList(self, commitID):
-        if commitID in self.missingList:
+    def isCommitInMissingDict(self, commitID):
+        if commitID in self.missingDict:
             return True
 
         return False
 
-    def printMissingCommits(self, comparisonCommitList):
+    def printMissingCommits(self, comparisonCommitList, comparisonCommitDict):
 
         # Note: Print in the order given by the commitList and not
         #       in arbitrary order of the commit dictionary.
 
         print "Missing from %s" % self.branchName
 
-        for commitObj in comparisonCommitList:
-            commitID = commitObj.getCommitID()
-            if self.isCommitInMissingList(commitID):
-                cmd = gitAuthorCmd + [commitID]
+        for commitID in comparisonCommitList:
+            if self.isCommitInMissingDict(commitID):
+                cmd          = gitAuthorCmd + [commitID]
                 commitAuthor = subprocess.check_output(cmd).rstrip()
+                commitObj    = comparisonCommitDict[commitID]
 
-                print '  %s (%s) %s' % (commitID, commitAuthor, commitObj.getCommitSubject() )
+                print '  %s (%s) %s' % \
+                    (commitID, commitAuthor, commitObj.getCommitSubject() )
 
         print
 
@@ -111,6 +116,9 @@ class Branch:
 
     def getCommitList(self):
         return self.commitList
+
+    def getCommitObjDict(self):
+        return self.commitObjDict
 
 def usage():
         print '''
@@ -140,7 +148,7 @@ except:
 
 for opt,arg in opts:
     if opt == '-h':
-        usage()   
+        usage()
         sys.exit();
     if opt == '-a':
         branchAName = arg
@@ -169,17 +177,19 @@ branchBObj = Branch(branchBName)
 branchAObj.doComparedBranchLog(branchBName)
 branchBObj.doComparedBranchLog(branchAName)
 
-branchAObj.createMissingList(branchBObj.getPatchIdDict() )
-branchBObj.createMissingList(branchAObj.getPatchIdDict() )
+branchAObj.createMissingDict(branchBObj.getPatchIdDict() )
+branchBObj.createMissingDict(branchAObj.getPatchIdDict() )
 
 
 #print
 
 if not branchBOnly:
-    branchAObj.printMissingCommits(branchBObj.getCommitList() )
+    branchAObj.printMissingCommits(branchBObj.getCommitList(), \
+        branchBObj.getCommitObjDict()  )
 
 if not branchAOnly:
-    branchBObj.printMissingCommits(branchAObj.getCommitList() )
+    branchBObj.printMissingCommits(branchAObj.getCommitList(), \
+        branchAObj.getCommitObjDict() )
 
 #if not branchBOnly and not branchAOnly:
 #    print
