@@ -95,7 +95,12 @@ class Branch:
 
     def doComparedBranchLog(self, comparedBranchName):
         cmd = gitLogCmd + [self.branchName]
-        cmd += ['^' + comparedBranchName]
+
+        if 'logSinceTime' in globals():
+            cmd.append('--since="%s"' % logSinceTime)
+        elif not 'exactSearch' in globals():
+            cmd.append('^' + comparedBranchName)
+
         # print 'Compared branch log: ' + str(cmd)
 
         log = subprocess.check_output(cmd );
@@ -169,23 +174,29 @@ def usage():
         print '''
         Usage:
 
-          -h 
+          -h
                 Print this help message.
           -a <branch-name> 
                 The name of branch a.
-          -b <branch-name> 
+          -b <branch-name>
                 The name of branch b.
-          -A 
-                List commits missing from branch a only
-          -B 
-                List commits missing from branch b only
+          -A
+                List commits missing from branch a only.
+          -B
+                List commits missing from branch b only.
+          -e
+                Exact search with *all* commits. Usually we list commits with
+                'git log branchA ^branchB', which might not be correct with
+                merges between branches.
           -r
-                Print in reverse order (older (top) to newer (bottom) )
+                Print in reverse order (older (top) to newer (bottom) ).
+          -t
+                How far back in time to go (passed to git log as --since) i.e. '1 month ago'.
         '''
 
 
 try:
-    opts, args = getopt.getopt(sys.argv[1:], "ha:b:BAr")
+    opts, args = getopt.getopt(sys.argv[1:], "ha:b:BAert:")
 except:
     usage()
     sys.exit()
@@ -203,8 +214,12 @@ for opt,arg in opts:
         branchAOnly = True
     if opt == '-B':
         branchBOnly = True
+    if opt == '-e':
+        exactSearch = True
     if opt == '-r':
         reversedOrder = True
+    if opt == '-t':
+        logSinceTime = arg
 
 
 if 'branchAName' not in globals() or 'branchBName' not in globals():
