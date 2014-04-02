@@ -13,9 +13,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 import sys, subprocess, getopt
 import re
 
-gitLogCmd       = ['git','log','--pretty=oneline','--no-merges']
-gitAuthorCmd    = ['git', 'show', '-s', '--format=(%an)']
-gitCommitMsgCmd = ['git', 'log', '-1', '--pretty=%B' ]
+gitLogCmd       = ['git', 'log', '--pretty=oneline', '--no-merges', '--no-color']
+gitAuthorCmd    = ['git', 'show', '-s', '--format=(%an)', '--no-color']
+gitCommitMsgCmd = ['git', 'log', '-1', '--pretty=%B', '--no-color']
 
 branchAOnly   = False
 branchBOnly   = False
