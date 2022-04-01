@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python2
 '''
 Copyright (c) 2012 Rowan Wookey <admin@rwky.net>
           (c) 2013 Bernd Schubert <bernd.schubert@itwm.fraunhofer.de>
@@ -181,7 +181,7 @@ def usage():
 
           -h
                 Print this help message.
-          -a <branch-name> 
+          -a <branch-name>
                 The name of branch a.
           -b <branch-name>
                 The name of branch b.
