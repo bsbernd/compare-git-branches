@@ -1,7 +1,8 @@
-#!/usr/bin/env python2
+#! /usr/bin/env python3
 '''
 Copyright (c) 2012 Rowan Wookey <admin@rwky.net>
           (c) 2013 Bernd Schubert <bernd.schubert@itwm.fraunhofer.de>
+          (c) 2024 Bernd Schubert <bernd@bsbernd.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -21,7 +22,7 @@ branchAOnly   = False
 branchBOnly   = False
 reversedOrder = False
 
-cherryPickLine = '\(cherry picked from commit '
+cherryPickLine = r'\(cherry picked from commit '
 
 # just a basic commit object
 class gitCommit:
@@ -52,7 +53,7 @@ class Branch:
         self.missingDict    = {} # list of missing commitIDs of this branch
 
     def searchCherryPickID(self, commitID):
-        commitMsg = subprocess.check_output(gitCommitMsgCmd + [commitID])
+        commitMsg = subprocess.check_output(gitCommitMsgCmd + [commitID], universal_newlines=True)
 
         searchRegEx  = re.compile(cherryPickLine)
 
@@ -61,7 +62,7 @@ class Branch:
                 cherryPickID = searchRegEx.split(line)[1]
 
                 # remove closing bracket
-                cherryPickID = re.sub('\)$', '', cherryPickID)
+                cherryPickID = re.sub(r'\)$', '', cherryPickID)
 
                 return cherryPickID
 
@@ -69,11 +70,12 @@ class Branch:
 
         commitObj = gitCommit(commitID, commitSubject)
 
-        gitShow = subprocess.check_output(['git', 'show', commitID])
-        proc = subprocess.Popen(['git', 'patch-id'], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+        gitShow = subprocess.check_output(['git', 'show', commitID], universal_newlines=True)
+        proc = subprocess.Popen(['git', 'patch-id'], stdout=subprocess.PIPE, stdin=subprocess.PIPE,
+                              universal_newlines=True)
         patchID = proc.communicate(input=gitShow)[0].split(' ')[0]
 
-        commitObj.addCherryPickID(self.searchCherryPickID(commitID) )
+        commitObj.addCherryPickID(self.searchCherryPickID(commitID))
         # print self.branchName + ': Adding: ' + patchID + ' : ' + commitID
 
         self.commitList.append(commitID)
@@ -103,8 +105,7 @@ class Branch:
 
         # print 'Compared branch log: ' + str(cmd)
 
-        log = subprocess.check_output(cmd );
-
+        log = subprocess.check_output(cmd, universal_newlines=True)
         self.addGitLog(log)
 
     def createMissingDict(self, comparisonDict):
@@ -129,16 +130,16 @@ class Branch:
         #       in arbitrary order of the commit dictionary.
 
         if doPrint:
-            print "Missing from %s" % self.branchName
+            print("Missing from %s" % self.branchName)
 
         for commitID in comparisonCommitList:
             if self.isCommitInMissingDict(commitID):
                 cmd          = gitAuthorCmd + [commitID]
-                commitAuthor = subprocess.check_output(cmd).rstrip()
+                commitAuthor = subprocess.check_output(cmd, universal_newlines=True).rstrip()
                 commitObj    = comparisonCommitDict[commitID]
 
                 cherryPickID = commitObj.getCherryPickID()
-                if (cherryPickID and (cherryPickID in self.commitObjDict) ):
+                if (cherryPickID and (cherryPickID in self.commitObjDict)):
 
                     # assign cherry pick id to our branch
                     if not doPrint:
@@ -153,11 +154,11 @@ class Branch:
                         not re.search(filterAuthor, commitAuthor):
                             continue # a different owner
 
-                    print '  %s %s %s' % \
-                        (commitID, commitAuthor, commitObj.getCommitSubject() )
+                    print('  %s %s %s' % \
+                        (commitID, commitAuthor, commitObj.getCommitSubject()))
 
         if doPrint:
-            print
+            print()
 
     def printMissingCommits(self, comparisonCommitList, comparisonCommitDict):
         self.iterateMissingCommits(comparisonCommitList, comparisonCommitDict, True)
@@ -176,7 +177,7 @@ class Branch:
         return self.commitObjDict
 
 def usage():
-        print '''
+        print('''
         Usage:
 
           -h
@@ -201,7 +202,7 @@ def usage():
                 Print in reverse order (older (top) to newer (bottom) ).
           -t
                 How far back in time to go (passed to git log as --since) i.e. '1 month ago'.
-        '''
+        ''')
 
 
 try:
@@ -214,7 +215,7 @@ except:
 for opt,arg in opts:
     if opt == '-h':
         usage()
-        sys.exit();
+        sys.exit()
     if opt == '-a':
         branchAName = arg
     if opt == '-b':
@@ -237,7 +238,7 @@ for opt,arg in opts:
 
 
 if 'branchAName' not in globals() or 'branchBName' not in globals():
-    print 'You must specify two branches with -a and -b'
+    print('You must specify two branches with -a and -b')
     sys.exit(1)
 
 if reversedOrder:
@@ -251,25 +252,25 @@ branchBObj = Branch(branchBName)
 branchAObj.doComparedBranchLog(branchBName)
 branchBObj.doComparedBranchLog(branchAName)
 
-branchAObj.createMissingDict(branchBObj.getPatchIdDict() )
-branchBObj.createMissingDict(branchAObj.getPatchIdDict() )
+branchAObj.createMissingDict(branchBObj.getPatchIdDict())
+branchBObj.createMissingDict(branchAObj.getPatchIdDict())
 
 
 branchAObj.reverseAssignCherryPickIDs(branchBObj.getCommitList(), \
-    branchBObj.getCommitObjDict()  )
+    branchBObj.getCommitObjDict())
 
 branchBObj.reverseAssignCherryPickIDs(branchAObj.getCommitList(), \
-    branchAObj.getCommitObjDict() )
+    branchAObj.getCommitObjDict())
 
 #print
 
 if not branchBOnly:
     branchAObj.printMissingCommits(branchBObj.getCommitList(), \
-        branchBObj.getCommitObjDict()  )
+        branchBObj.getCommitObjDict())
 
 if not branchAOnly:
     branchBObj.printMissingCommits(branchAObj.getCommitList(), \
-        branchAObj.getCommitObjDict() )
+        branchAObj.getCommitObjDict())
 
 #if not branchBOnly and not branchAOnly:
 #    print
@@ -277,5 +278,3 @@ if not branchAOnly:
 #    for msg in branch1_commit_msg:
 #        if msg in branch2_commit_msg:
 #            print '  ' + msg
-
-
