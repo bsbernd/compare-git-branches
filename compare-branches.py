@@ -103,7 +103,7 @@ class Branch:
         elif not 'exactSearch' in globals():
             cmd.append('^' + comparedBranchName)
 
-        # print 'Compared branch log: ' + str(cmd)
+        # print('Compared branch log: ' + str(cmd))
 
         log = subprocess.check_output(cmd, universal_newlines=True)
         self.addGitLog(log)
@@ -155,7 +155,7 @@ class Branch:
                             continue # a different owner
 
                     print('  %s %s %s' % \
-                        (commitID, commitAuthor, commitObj.getCommitSubject()))
+                        (commitID[:8], commitAuthor, commitObj.getCommitSubject()))
 
         if doPrint:
             print()
