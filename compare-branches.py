@@ -14,6 +14,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 import sys, subprocess, getopt, os
 import re
 import signal
+import hashlib
 
 gitLogCmd       = ['git', 'log', '--pretty=oneline', '--no-merges', '--no-color']
 gitAuthorCmd    = ['git', 'show', '-s', '--format=(%an)', '--no-color']
@@ -23,6 +24,9 @@ branchAOnly   = False
 branchBOnly   = False
 reversedOrder = False
 subdir = None  # New global variable to store subdirectory path
+filterBySubject = False
+branchAStartCommit = None  # Starting commit for branch A
+branchBStartCommit = None  # Starting commit for branch B
 
 cherryPickLine = r'\(cherry picked from commit '
 
@@ -53,6 +57,10 @@ class Branch:
         self.commitList     = []  # list of git commit ids
         self.commitObjDict  = {}  # list of gitCommit objects
         self.missingDict    = {} # list of missing commitIDs of this branch
+        self.subjectHashDict = {}  # Dictionary to store subject hashes and their counts
+
+    def hash_subject(self, subject):
+        return hashlib.sha1(subject.encode()).hexdigest()
 
     def searchCherryPickID(self, commitID):
         commitMsg = subprocess.check_output(gitCommitMsgCmd + [commitID], universal_newlines=True)
@@ -69,7 +77,6 @@ class Branch:
                 return cherryPickID
 
     def addCommit(self, commitID, commitSubject):
-
         commitObj = gitCommit(commitID, commitSubject)
 
         # Use errors='replace' to handle non-UTF-8 characters
@@ -103,11 +110,13 @@ class Branch:
         for line in lines:
             self.addLogLine(line)
 
-    def doComparedBranchLog(self, comparedBranchName):
+    def doComparedBranchLog(self, comparedBranchName, startCommit=None):
         cmd = gitLogCmd + [self.branchName]
 
         if 'logSinceTime' in globals():
             cmd.append('--since="%s"' % logSinceTime)
+        elif startCommit:
+            cmd.append('^' + startCommit)
         elif not 'exactSearch' in globals():
             cmd.append('^' + comparedBranchName)
 
@@ -145,6 +154,9 @@ class Branch:
         if doPrint:
             print("Missing from %s" % self.branchName)
 
+        # Track subject occurrences during iteration
+        subject_count = {}
+
         for commitID in comparisonCommitList:
             if self.isCommitInMissingDict(commitID):
                 cmd          = gitAuthorCmd + [commitID]
@@ -153,22 +165,36 @@ class Branch:
 
                 cherryPickID = commitObj.getCherryPickID()
                 if (cherryPickID and (cherryPickID in self.commitObjDict)):
-
                     # assign cherry pick id to our branch
                     if not doPrint:
                         cherryObj = self.commitObjDict[cherryPickID]
                         cherryObj.addCherryPickID(commitID)
-
                     continue
 
                 if doPrint:
-
                     if 'filterAuthor' in globals() and \
                         not re.search(filterAuthor, commitAuthor):
                             continue # a different owner
 
-                    print('  %s %s %s' % \
-                        (commitID[:8], commitAuthor, commitObj.getCommitSubject()))
+                    # Only calculate subject hash here for remaining commits
+                    subject = commitObj.getCommitSubject()
+                    subject_hash = hashlib.sha1(subject.encode()).hexdigest()
+
+                    # Track this subject occurrence
+                    subject_count[subject_hash] = subject_count.get(subject_hash, 0) + 1
+
+                    # Check if this subject exists in our branch
+                    matching_count = len([c for c in self.commitList
+                                       if self.commitObjDict[c].getCommitSubject() == subject])
+
+                    if filterBySubject:
+                        # Skip if we've seen fewer or equal occurrences in our branch
+                        if subject_count[subject_hash] <= matching_count:
+                            continue
+
+                    print('  %s %s %s %s' % \
+                        (('*' if matching_count > 0 else ' '),
+                         commitID[:8], commitAuthor, subject))
 
         if doPrint:
             print()
@@ -200,6 +226,10 @@ def usage():
                 List commits missing from branch1 only.
           -B
                 List commits missing from branch2 only.
+          --b1 <commit>
+                Starting commit for branch1 (ref1). Only compare commits after this point.
+          --b2 <commit>
+                Starting commit for branch2 (ref2). Only compare commits after this point.
           -d
                 Print the date when the commit was created.
           -D <path>
@@ -212,6 +242,8 @@ def usage():
                 Only print commits created by this user.
           -r
                 Print in reverse order (older (top) to newer (bottom) ).
+          -S
+                Filter out commits that have matching subject lines in the other branch.
           -t
                 How far back in time to go (passed to git log as --since) i.e. '1 month ago'.
         ''')
@@ -225,7 +257,7 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 try:
-    opts, args = getopt.getopt(sys.argv[1:], "hABdD:ef:rt:")
+    opts, args = getopt.getopt(sys.argv[1:], "hABdD:ef:rSt:", ["b1=", "b2="])
 except:
     usage()
     sys.exit(1)
@@ -238,6 +270,10 @@ for opt,arg in opts:
         branchAOnly = True
     if opt == '-B':
         branchBOnly = True
+    if opt == '--b1':
+        branchAStartCommit = arg
+    if opt == '--b2':
+        branchBStartCommit = arg
     if opt == '-d':
         # mis-use the author command and add the commit date
         gitAuthorCmd[3] = '--format=(%an) %aD'
@@ -247,6 +283,8 @@ for opt,arg in opts:
         filterAuthor = arg
     if opt == '-r':
         reversedOrder = True
+    if opt == '-S':
+        filterBySubject = True
     if opt == '-t':
         logSinceTime = arg
     if opt == '-D':
@@ -295,8 +333,8 @@ branchAObj = Branch(branchAName)
 branchBObj = Branch(branchBName)
 
 
-branchAObj.doComparedBranchLog(branchBName)
-branchBObj.doComparedBranchLog(branchAName)
+branchAObj.doComparedBranchLog(branchBName, branchAStartCommit)
+branchBObj.doComparedBranchLog(branchAName, branchBStartCommit)
 
 branchAObj.createMissingDict(branchBObj.getPatchIdDict())
 branchBObj.createMissingDict(branchAObj.getPatchIdDict())
