@@ -70,9 +70,15 @@ class Branch:
 
         commitObj = gitCommit(commitID, commitSubject)
 
-        gitShow = subprocess.check_output(['git', 'show', commitID], universal_newlines=True)
-        proc = subprocess.Popen(['git', 'patch-id'], stdout=subprocess.PIPE, stdin=subprocess.PIPE,
-                              universal_newlines=True)
+        # Use errors='replace' to handle non-UTF-8 characters
+        gitShow = subprocess.check_output(['git', 'show', commitID],
+                                        encoding='utf-8',
+                                        errors='replace')
+        proc = subprocess.Popen(['git', 'patch-id'],
+                              stdout=subprocess.PIPE,
+                              stdin=subprocess.PIPE,
+                              encoding='utf-8',
+                              errors='replace')
         patchID = proc.communicate(input=gitShow)[0].split(' ')[0]
 
         commitObj.addCherryPickID(self.searchCherryPickID(commitID))
