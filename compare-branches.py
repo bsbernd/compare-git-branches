@@ -190,25 +190,22 @@ class Branch:
 
 def usage():
         print('''
-        Usage:
+        Usage: compare-branches.py [options] <ref1> <ref2>
 
+        Options:
           -h
                 Print this help message.
-          -a <branch-name>
-                The name of branch a.
-          -b <branch-name>
-                The name of branch b.
           -A
-                List commits missing from branch a only.
+                List commits missing from branch1 only.
           -B
-                List commits missing from branch b only.
+                List commits missing from branch2 only.
           -d
                 Print the date when the commit was created.
           -D <path>
                 Only show commits that modify files under this directory path
           -e
                 Exact search with *all* commits. Usually we list commits with
-                'git log branchA ^branchB', which might not be correct with
+                'git log branch1 ^branch2', which might not be correct with
                 merges between branches.
           -f
                 Only print commits created by this user.
@@ -220,20 +217,15 @@ def usage():
 
 
 try:
-    opts, args = getopt.getopt(sys.argv[1:], "ha:b:BAdD:ef:rt:")
+    opts, args = getopt.getopt(sys.argv[1:], "hABdD:ef:rt:")
 except:
     usage()
-    sys.exit()
-
+    sys.exit(1)
 
 for opt,arg in opts:
     if opt == '-h':
         usage()
         sys.exit()
-    if opt == '-a':
-        branchAName = arg
-    if opt == '-b':
-        branchBName = arg
     if opt == '-A':
         branchAOnly = True
     if opt == '-B':
@@ -255,10 +247,14 @@ for opt,arg in opts:
             print(f"Error: Path '{subdir}' does not exist", file=sys.stderr)
             sys.exit(1)
 
-
-if 'branchAName' not in globals() or 'branchBName' not in globals():
-    print('You must specify two branches with -a and -b')
+# Check if we have exactly two branch arguments
+if len(args) != 2:
+    print('Error: Exactly two git references are required', file=sys.stderr)
+    usage()
     sys.exit(1)
+
+branchAName = args[0]
+branchBName = args[1]
 
 def check_ref_exists(ref_name):
     """Check if a git reference (branch/tag) exists"""
