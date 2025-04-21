@@ -11,7 +11,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 '''
 
-import sys, subprocess, getopt
+import sys, subprocess, getopt, os
 import re
 
 gitLogCmd       = ['git', 'log', '--pretty=oneline', '--no-merges', '--no-color']
@@ -21,6 +21,7 @@ gitCommitMsgCmd = ['git', 'log', '-1', '--pretty=%B', '--no-color']
 branchAOnly   = False
 branchBOnly   = False
 reversedOrder = False
+subdir = None  # New global variable to store subdirectory path
 
 cherryPickLine = r'\(cherry picked from commit '
 
@@ -108,6 +109,11 @@ class Branch:
             cmd.append('--since="%s"' % logSinceTime)
         elif not 'exactSearch' in globals():
             cmd.append('^' + comparedBranchName)
+
+        # Add path limitation if subdir is specified
+        if 'subdir' in globals() and subdir:
+            cmd.append('--')
+            cmd.append(subdir)
 
         # print('Compared branch log: ' + str(cmd))
 
@@ -198,6 +204,8 @@ def usage():
                 List commits missing from branch b only.
           -d
                 Print the date when the commit was created.
+          -D <path>
+                Only show commits that modify files under this directory path
           -e
                 Exact search with *all* commits. Usually we list commits with
                 'git log branchA ^branchB', which might not be correct with
@@ -212,7 +220,7 @@ def usage():
 
 
 try:
-    opts, args = getopt.getopt(sys.argv[1:], "ha:b:BAdef:rt:")
+    opts, args = getopt.getopt(sys.argv[1:], "ha:b:BAdD:ef:rt:")
 except:
     usage()
     sys.exit()
@@ -241,11 +249,39 @@ for opt,arg in opts:
         reversedOrder = True
     if opt == '-t':
         logSinceTime = arg
+    if opt == '-D':
+        subdir = arg.rstrip('/')  # Remove trailing slash if present
+        if not os.path.exists(subdir):
+            print(f"Error: Path '{subdir}' does not exist", file=sys.stderr)
+            sys.exit(1)
 
 
 if 'branchAName' not in globals() or 'branchBName' not in globals():
     print('You must specify two branches with -a and -b')
     sys.exit(1)
+
+def check_ref_exists(ref_name):
+    """Check if a git reference (branch/tag) exists"""
+    try:
+        # Use git rev-parse to check if the reference exists
+        subprocess.check_output(['git', 'rev-parse', '--verify', ref_name],
+                              stderr=subprocess.DEVNULL,
+                              universal_newlines=True)
+        return True
+    except subprocess.CalledProcessError:
+        print(f"Error: Branch, tag or commit '{ref_name}' does not exist", \
+              file=sys.stderr)
+        return False
+
+def validate_refs(branch_a, branch_b):
+    """Validate that both git references exist"""
+    if not check_ref_exists(branch_a):
+        sys.exit(1)
+
+    if not check_ref_exists(branch_b):
+        sys.exit(1)
+
+validate_refs(branchAName, branchBName)
 
 if reversedOrder:
     gitLogCmd += ['--reverse']
