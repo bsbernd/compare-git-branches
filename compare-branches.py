@@ -13,6 +13,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 import sys, subprocess, getopt, os
 import re
+import signal
 
 gitLogCmd       = ['git', 'log', '--pretty=oneline', '--no-merges', '--no-color']
 gitAuthorCmd    = ['git', 'show', '-s', '--format=(%an)', '--no-color']
@@ -216,6 +217,13 @@ def usage():
         ''')
 
 
+def signal_handler(sig, frame):
+    print('\nInterrupted by user. Exiting...', file=sys.stderr)
+    sys.exit(0)
+
+# Register the signal handler
+signal.signal(signal.SIGINT, signal_handler)
+
 try:
     opts, args = getopt.getopt(sys.argv[1:], "hABdD:ef:rt:")
 except:
@@ -299,8 +307,6 @@ branchAObj.reverseAssignCherryPickIDs(branchBObj.getCommitList(), \
 
 branchBObj.reverseAssignCherryPickIDs(branchAObj.getCommitList(), \
     branchAObj.getCommitObjDict())
-
-#print
 
 if not branchBOnly:
     branchAObj.printMissingCommits(branchBObj.getCommitList(), \
