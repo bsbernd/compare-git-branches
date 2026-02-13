@@ -27,6 +27,7 @@ subdir = None  # New global variable to store subdirectory path
 filterBySubject = False
 branchAStartCommit = None  # Starting commit for branch A
 branchBStartCommit = None  # Starting commit for branch B
+ignorePaths = []  # List of paths to ignore
 
 cherryPickLine = r'\(cherry picked from commit '
 
@@ -176,6 +177,10 @@ class Branch:
                         not re.search(filterAuthor, commitAuthor):
                             continue # a different owner
 
+                    # Check if commit should be ignored based on modified files
+                    if should_ignore_commit(commitID):
+                        continue
+
                     # Only calculate subject hash here for remaining commits
                     subject = commitObj.getCommitSubject()
                     subject_hash = hashlib.sha1(subject.encode()).hexdigest()
@@ -227,9 +232,11 @@ def usage():
           -B
                 List commits missing from branch2 only.
           --b1 <commit>
-                Starting commit for branch1 (ref1). Only compare commits after this point.
+                Starting commit for branch1 (ref1). If --b2 is not specified,
+                searches backwards on branch2 to find matching commit or cherry-pick.
           --b2 <commit>
-                Starting commit for branch2 (ref2). Only compare commits after this point.
+                Starting commit for branch2 (ref2). If --b1 is not specified,
+                searches backwards on branch1 to find matching commit or cherry-pick.
           -d
                 Print the date when the commit was created.
           -D <path>
@@ -240,6 +247,10 @@ def usage():
                 merges between branches.
           -f
                 Only print commits created by this user.
+          -i <path>
+                Ignore commits that only modify files under this path. Can be
+                specified multiple times. Commits are shown if they modify ANY
+                file outside the ignored paths.
           -r
                 Print in reverse order (older (top) to newer (bottom) ).
           -S
@@ -249,6 +260,94 @@ def usage():
         ''')
 
 
+def get_cherry_pick_id(commit):
+    """Extract cherry-pick ID from a commit message"""
+    try:
+        commit_msg = subprocess.check_output(gitCommitMsgCmd + [commit],
+                                            universal_newlines=True)
+        searchRegEx = re.compile(cherryPickLine)
+        for line in commit_msg.splitlines():
+            if searchRegEx.search(line):
+                cherry_pick_id = searchRegEx.split(line)[1]
+                cherry_pick_id = re.sub(r'\)$', '', cherry_pick_id)
+                return cherry_pick_id
+    except subprocess.CalledProcessError:
+        pass
+    return None
+
+def find_matching_commit_backwards(target_commit, search_branch, merge_base):
+    """Search backwards on search_branch to find target_commit or its cherry-pick"""
+    # Get cherry-pick ID from the target commit if it exists
+    target_cherry_pick = get_cherry_pick_id(target_commit)
+
+    cmd = ['git', 'log', '--pretty=%H', '--no-merges', '--no-color',
+           search_branch, '^' + merge_base]
+
+    try:
+        log_output = subprocess.check_output(cmd, universal_newlines=True)
+    except subprocess.CalledProcessError:
+        return None
+
+    commits = log_output.strip().split('\n')
+    if not commits or commits[0] == '':
+        return None
+
+    for commit in commits:
+        # Check if this is the exact commit hash
+        if commit == target_commit:
+            return commit
+
+        # Check if this is the cherry-pick ID from target commit
+        if target_cherry_pick and commit == target_cherry_pick:
+            return commit
+
+        # Check if this commit has target_commit as its cherry-pick ID
+        try:
+            commit_msg = subprocess.check_output(gitCommitMsgCmd + [commit],
+                                                universal_newlines=True)
+            if f'(cherry picked from commit {target_commit}' in commit_msg:
+                return commit
+            # Also check if it has the target's cherry-pick as its cherry-pick
+            if target_cherry_pick and f'(cherry picked from commit {target_cherry_pick}' in commit_msg:
+                return commit
+        except subprocess.CalledProcessError:
+            continue
+
+    return None
+
+def should_ignore_commit(commit_id):
+    """Check if commit should be ignored based on modified files"""
+    if not ignorePaths:
+        return False
+
+    try:
+        # Get list of files modified in this commit
+        files = subprocess.check_output(['git', 'diff-tree', '--no-commit-id',
+                                        '--name-only', '-r', commit_id],
+                                       universal_newlines=True)
+        modified_files = files.strip().split('\n')
+
+        # Check if any file is NOT in the ignore paths
+        for file_path in modified_files:
+            if not file_path:
+                continue
+
+            # Check if this file matches any ignore path
+            is_ignored = False
+            for ignore_path in ignorePaths:
+                if file_path.startswith(ignore_path + '/') or file_path == ignore_path:
+                    is_ignored = True
+                    break
+
+            # If file is not ignored, commit should be shown
+            if not is_ignored:
+                return False
+
+        # All files are in ignored paths
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
 def signal_handler(sig, frame):
     print('\nInterrupted by user. Exiting...', file=sys.stderr)
     sys.exit(0)
@@ -257,7 +356,7 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 try:
-    opts, args = getopt.getopt(sys.argv[1:], "hABdD:ef:rSt:", ["b1=", "b2="])
+    opts, args = getopt.getopt(sys.argv[1:], "hABdD:ef:i:rSt:", ["b1=", "b2="])
 except:
     usage()
     sys.exit(1)
@@ -281,6 +380,8 @@ for opt,arg in opts:
         exactSearch = True
     if opt == '-f':
         filterAuthor = arg
+    if opt == '-i':
+        ignorePaths.append(arg.rstrip('/'))
     if opt == '-r':
         reversedOrder = True
     if opt == '-S':
@@ -332,9 +433,29 @@ if reversedOrder:
 branchAObj = Branch(branchAName)
 branchBObj = Branch(branchBName)
 
+# Handle --b1 and --b2 options
+if 'branchAStartCommit' in globals() and branchAStartCommit:
+    if not ('branchBStartCommit' in globals() and branchBStartCommit):
+        # Only --b1 specified, search backwards on branch B
+        merge_base = subprocess.check_output(['git', 'merge-base', branchAName, branchBName],
+                                            universal_newlines=True).strip()
+        branchBStartCommit = find_matching_commit_backwards(branchAStartCommit, branchBName, merge_base)
+        if not branchBStartCommit:
+            print(f"Warning: Could not find matching commit for {branchAStartCommit} on {branchBName}",
+                  file=sys.stderr)
 
-branchAObj.doComparedBranchLog(branchBName, branchAStartCommit)
-branchBObj.doComparedBranchLog(branchAName, branchBStartCommit)
+if 'branchBStartCommit' in globals() and branchBStartCommit:
+    if not ('branchAStartCommit' in globals() and branchAStartCommit):
+        # Only --b2 specified, search backwards on branch A
+        merge_base = subprocess.check_output(['git', 'merge-base', branchAName, branchBName],
+                                            universal_newlines=True).strip()
+        branchAStartCommit = find_matching_commit_backwards(branchBStartCommit, branchAName, merge_base)
+        if not branchAStartCommit:
+            print(f"Warning: Could not find matching commit for {branchBStartCommit} on {branchAName}",
+                  file=sys.stderr)
+
+branchAObj.doComparedBranchLog(branchBName, branchAStartCommit if 'branchAStartCommit' in globals() else None)
+branchBObj.doComparedBranchLog(branchAName, branchBStartCommit if 'branchBStartCommit' in globals() else None)
 
 branchAObj.createMissingDict(branchBObj.getPatchIdDict())
 branchBObj.createMissingDict(branchAObj.getPatchIdDict())
