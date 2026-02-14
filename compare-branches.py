@@ -63,6 +63,19 @@ class Branch:
     def hash_subject(self, subject):
         return hashlib.sha1(subject.encode()).hexdigest()
 
+    def get_commit_message_normalized(self, commitID):
+        """Get commit message with cherry-pick lines removed for comparison"""
+        try:
+            commitMsg = subprocess.check_output(gitCommitMsgCmd + [commitID],
+                                              universal_newlines=True)
+            lines = []
+            for line in commitMsg.splitlines():
+                if not re.search(cherryPickLine, line):
+                    lines.append(line)
+            return '\n'.join(lines).strip()
+        except subprocess.CalledProcessError:
+            return ""
+
     def searchCherryPickID(self, commitID):
         commitMsg = subprocess.check_output(gitCommitMsgCmd + [commitID], universal_newlines=True)
 
@@ -147,7 +160,8 @@ class Branch:
 
     # iterate over missing commits to either reverse-assign cherry-pick-ids or to
     # print missing commits
-    def iterateMissingCommits(self, comparisonCommitList, comparisonCommitDict, doPrint):
+    def iterateMissingCommits(self, comparisonCommitList, comparisonCommitDict,
+                            doPrint, otherBranchMissingDict=None, otherBranchCommitDict=None):
 
         # Note: Print in the order given by the commitList and not
         #       in arbitrary order of the commit dictionary.
@@ -157,6 +171,22 @@ class Branch:
 
         # Track subject occurrences during iteration
         subject_count = {}
+
+        # Build a map of normalized messages and cherry-pick IDs from other branch's missing commits
+        other_branch_msg_map = {}
+        other_branch_cherry_pick_ids = {}
+        if doPrint and otherBranchMissingDict and otherBranchCommitDict:
+            for otherCommitID in otherBranchMissingDict.keys():
+                if otherCommitID in otherBranchCommitDict:
+                    msg = otherBranchCommitDict[otherCommitID].getCommitSubject()
+                    normalized_msg = self.get_commit_message_normalized(otherCommitID)
+                    if normalized_msg:
+                        other_branch_msg_map[otherCommitID] = (msg, normalized_msg)
+
+                    # Track cherry-pick IDs
+                    cherry_pick_id = otherBranchCommitDict[otherCommitID].getCherryPickID()
+                    if cherry_pick_id:
+                        other_branch_cherry_pick_ids[cherry_pick_id] = otherCommitID
 
         for commitID in comparisonCommitList:
             if self.isCommitInMissingDict(commitID):
@@ -185,6 +215,24 @@ class Branch:
                     subject = commitObj.getCommitSubject()
                     subject_hash = hashlib.sha1(subject.encode()).hexdigest()
 
+                    # Check if this commit has a matching cherry-pick ID in other branch's missing list
+                    my_cherry_pick_id = commitObj.getCherryPickID()
+                    if my_cherry_pick_id and my_cherry_pick_id in other_branch_cherry_pick_ids:
+                        continue
+
+                    # Check if this commit has a matching message in other branch's missing list
+                    if otherBranchMissingDict and commitID in self.missingDict:
+                        my_normalized_msg = self.get_commit_message_normalized(commitID)
+                        if my_normalized_msg:
+                            # Check if any commit in other branch's missing list has same message
+                            found_match = False
+                            for otherCommitID, (otherSubject, otherNormalizedMsg) in other_branch_msg_map.items():
+                                if my_normalized_msg == otherNormalizedMsg and subject == otherSubject:
+                                    found_match = True
+                                    break
+                            if found_match:
+                                continue
+
                     # Track this subject occurrence
                     subject_count[subject_hash] = subject_count.get(subject_hash, 0) + 1
 
@@ -204,11 +252,13 @@ class Branch:
         if doPrint:
             print()
 
-    def printMissingCommits(self, comparisonCommitList, comparisonCommitDict):
-        self.iterateMissingCommits(comparisonCommitList, comparisonCommitDict, True)
+    def printMissingCommits(self, comparisonCommitList, comparisonCommitDict,
+                          otherBranchMissingDict=None, otherBranchCommitDict=None):
+        self.iterateMissingCommits(comparisonCommitList, comparisonCommitDict, True,
+                                  otherBranchMissingDict, otherBranchCommitDict)
 
     def reverseAssignCherryPickIDs(self, comparisonCommitList, comparisonCommitDict):
-        self.iterateMissingCommits(comparisonCommitList, comparisonCommitDict, False)
+        self.iterateMissingCommits(comparisonCommitList, comparisonCommitDict, False, None, None)
 
 
     def getPatchIdDict(self):
@@ -469,11 +519,11 @@ branchBObj.reverseAssignCherryPickIDs(branchAObj.getCommitList(), \
 
 if not branchBOnly:
     branchAObj.printMissingCommits(branchBObj.getCommitList(), \
-        branchBObj.getCommitObjDict())
+        branchBObj.getCommitObjDict(), branchBObj.missingDict, branchAObj.getCommitObjDict())
 
 if not branchAOnly:
     branchBObj.printMissingCommits(branchAObj.getCommitList(), \
-        branchAObj.getCommitObjDict())
+        branchAObj.getCommitObjDict(), branchAObj.missingDict, branchBObj.getCommitObjDict())
 
 #if not branchBOnly and not branchAOnly:
 #    print
